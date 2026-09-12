@@ -15,6 +15,12 @@ S7 使用 Standard 单一正式主线：写作计划、完整章节草稿、逐�
 任一门禁失败时继续修复，不要声称已经完成。
 ```
 
+## Huawei Cup Beginner Guided Project
+
+第一次参加华为杯/研究生数学建模类比赛时，推荐直接使用 [华为杯新手使用指南](huawei-cup-beginner.md) 中的完整启动提示词。
+
+该模式不会降低 Standard 的正式交付要求；它只要求 Agent 在 S1-S5 先完成可运行基线、解释关键选择，并在复杂化模型前先检查误差、稳定性、约束与证据。
+
 ## Resume An Interrupted Project
 
 ```text
