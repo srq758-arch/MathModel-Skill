@@ -43,6 +43,9 @@ jobs:
       - name: Run test suite
         run: python -u tests/run_tests.py
 
+      - name: Check beginner-guided workflow profile
+        run: python tests/test_workflow_profile.py
+
       - name: Check complete-paper scope regressions
         run: python tests/test_paper_scope.py
 
