@@ -15,11 +15,24 @@ S7 使用 Standard 单一正式主线：写作计划、完整章节草稿、逐�
 任一门禁失败时继续修复，不要声称已经完成。
 ```
 
+## Huawei Cup Beginner Guided Project
+
+第一次参加华为杯/研究生数学建模类比赛时，推荐使用 [华为杯新手使用指南](huawei-cup-beginner.md)，并先启用 `beginner-guided` profile。
+
+```text
+Codex:       python .agents/skills/paper-workflow-orchestrator/scripts/workflow_profile.py --set beginner-guided
+Claude Code: python .claude/skills/paper-workflow-orchestrator/scripts/workflow_profile.py --set beginner-guided
+Trae:        python .trae/skills/paper-workflow-orchestrator/scripts/workflow_profile.py --set beginner-guided
+```
+
+启用后读取 `paper_output/context/workflow_profile.json`。该 profile 只约束 S1-S5 的执行策略：基线优先、真实基线运行后才能按触发条件升级模型、多个方案比较精度/稳定性/可解释性/实现成本，并提供简短阶段解释；S6-S8 的正式交付门禁保持不变。
+
 ## Resume An Interrupted Project
 
 ```text
 请使用 $paper-workflow-orchestrator 恢复这个项目。
 先运行 workflow_guard.py --status，读取 workflow_guard_report.json、workflow_memory.json 和当前文件哈希。
+如果项目存在 paper_output/context/workflow_profile.json，也先读取它并继续遵守当前 profile。
 从第一个失败阶段继续，不要凭对话记忆重跑已完成阶段，也不要跳过 S6-S8。
 ```
 
