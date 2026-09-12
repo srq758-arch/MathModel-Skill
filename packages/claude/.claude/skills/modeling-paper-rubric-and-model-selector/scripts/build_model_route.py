@@ -11,6 +11,7 @@ OUTPUT_DIR = BASE_DIR / "paper_output"
 STEP1_DIR = OUTPUT_DIR / "step1"
 PLAN_DIR = OUTPUT_DIR / "plan"
 PROBLEM_ANALYSIS_FILE = STEP1_DIR / "problem_analysis.json"
+PROFILE_FILE = OUTPUT_DIR / "context" / "workflow_profile.json"
 MODEL_ROUTE_FILE = PLAN_DIR / "model_route.json"
 RUBRIC_ALIGNMENT_FILE = PLAN_DIR / "rubric_alignment.json"
 SCORING_STRATEGY_FILE = PLAN_DIR / "scoring_strategy.md"
@@ -56,6 +57,16 @@ FORMULA_REQUIREMENTS = {
 }
 
 
+DEFAULT_COMPARISON_DIMENSIONS = ["accuracy", "stability", "interpretability", "implementation_cost"]
+DEFAULT_UPGRADE_TRIGGERS = [
+    "baseline_inadequate",
+    "systematic_residuals",
+    "constraint_violation",
+    "instability",
+    "justified_gain",
+]
+
+
 def load_json(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
@@ -64,6 +75,55 @@ def load_json(path: Path) -> dict[str, Any] | None:
         return data if isinstance(data, dict) else None
     except Exception:
         return None
+
+
+def load_workflow_profile() -> dict[str, Any]:
+    data = load_json(PROFILE_FILE)
+    if isinstance(data, dict) and data.get("profile") in {"standard", "beginner-guided"}:
+        return data
+    return {
+        "schema_version": "1.0",
+        "profile": "standard",
+        "implicit": True,
+        "baseline_first": False,
+        "model_upgrade_gate": {"enabled": False},
+        "comparison_dimensions": DEFAULT_COMPARISON_DIMENSIONS,
+        "preserve_formal_gates": ["S6", "S7", "S8"],
+    }
+
+
+def workflow_profile_snapshot(profile: dict[str, Any]) -> dict[str, Any]:
+    upgrade_gate = profile.get("model_upgrade_gate") if isinstance(profile.get("model_upgrade_gate"), dict) else {}
+    dimensions = profile.get("comparison_dimensions") if isinstance(profile.get("comparison_dimensions"), list) else DEFAULT_COMPARISON_DIMENSIONS
+    return {
+        "profile": str(profile.get("profile") or "standard"),
+        "implicit": bool(profile.get("implicit", False)),
+        "baseline_first": bool(profile.get("baseline_first", False)),
+        "model_upgrade_gate": upgrade_gate,
+        "comparison_dimensions": [str(item) for item in dimensions],
+        "preserve_formal_gates": list(profile.get("preserve_formal_gates") or ["S6", "S7", "S8"]),
+    }
+
+
+def build_execution_policy(profile: dict[str, Any], baseline_model: str, candidate_upgrade_model: str) -> dict[str, Any]:
+    beginner = str(profile.get("profile") or "standard") == "beginner-guided"
+    raw_gate = profile.get("model_upgrade_gate") if isinstance(profile.get("model_upgrade_gate"), dict) else {}
+    trigger_any = raw_gate.get("trigger_any") if isinstance(raw_gate.get("trigger_any"), list) else DEFAULT_UPGRADE_TRIGGERS
+    dimensions = profile.get("comparison_dimensions") if isinstance(profile.get("comparison_dimensions"), list) else DEFAULT_COMPARISON_DIMENSIONS
+    candidate = candidate_upgrade_model if candidate_upgrade_model and candidate_upgrade_model != baseline_model else ""
+    return {
+        "profile": "beginner-guided" if beginner else "standard",
+        "baseline_first": bool(profile.get("baseline_first", False)) if beginner else False,
+        "active_model_role": "baseline" if beginner else "selected_main",
+        "require_baseline_run": bool(raw_gate.get("require_baseline_run", False)) if beginner else False,
+        "candidate_upgrade_model": candidate,
+        "upgrade_gate": {
+            "enabled": bool(raw_gate.get("enabled", False)) if beginner else False,
+            "trigger_any": [str(item) for item in trigger_any] if beginner else [],
+            "no_trigger_action": str(raw_gate.get("no_trigger_action") or "keep_baseline") if beginner else "",
+        },
+        "comparison_dimensions": [str(item) for item in dimensions],
+    }
 
 
 def safe_read_text(path: Path) -> str:
@@ -133,6 +193,8 @@ def build_model_route(analysis: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(questions, list) or not questions:
         questions = []
 
+    profile = load_workflow_profile()
+    beginner = str(profile.get("profile") or "standard") == "beginner-guided"
     route_questions: list[dict[str, Any]] = []
     for index, question in enumerate(questions, start=1):
         if not isinstance(question, dict):
@@ -141,8 +203,10 @@ def build_model_route(analysis: dict[str, Any]) -> dict[str, Any]:
         task_type = str(question.get("task_type") or "综合建模/统计分析").strip()
         models = question.get("recommended_models") if isinstance(question.get("recommended_models"), dict) else {}
         baseline_model = str(models.get("baseline") or "可解释基线模型").strip()
-        main_model = str(models.get("improved") or baseline_model or "结合题目需求的主模型").strip()
-        backup_models = [m for m in match_rule(task_type, BACKUP_MODELS) if m not in {baseline_model, main_model}]
+        candidate_upgrade_model = str(models.get("improved") or baseline_model or "结合题目需求的主模型").strip()
+        main_model = baseline_model if beginner else candidate_upgrade_model
+        execution_policy = build_execution_policy(profile, baseline_model, candidate_upgrade_model)
+        backup_models = [m for m in match_rule(task_type, BACKUP_MODELS) if m not in {baseline_model, candidate_upgrade_model}]
         if not backup_models:
             backup_models = ["可解释统计模型", "稳健性对照模型"]
         formula_requirements = match_rule(task_type, FORMULA_REQUIREMENTS) or [
@@ -161,6 +225,8 @@ def build_model_route(analysis: dict[str, Any]) -> dict[str, Any]:
                 "core_goal": str(question.get("summary") or "将原题要求转化为可计算、可验证的建模任务。"),
                 "baseline_model": baseline_model,
                 "main_model": main_model,
+                "candidate_upgrade_model": execution_policy["candidate_upgrade_model"],
+                "execution_policy": execution_policy,
                 "backup_models": backup_models[:3],
                 "model_reason": model_reason(task_type, main_model, question),
                 "formula_requirements": formula_requirements,
@@ -175,10 +241,11 @@ def build_model_route(analysis: dict[str, Any]) -> dict[str, Any]:
         )
 
     return {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "generated_by": "modeling-paper-rubric-and-model-selector/scripts/build_model_route.py",
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "source": "paper_output/step1/problem_analysis.json",
+        "workflow_profile": workflow_profile_snapshot(profile),
         "paper_prompt_reference": "references/paper_prompt_default.md",
         "paper_prompt_chars": len(safe_read_text(PAPER_PROMPT_FILE)),
         "questions": route_questions,
@@ -234,22 +301,42 @@ def build_rubric_alignment(model_route: dict[str, Any]) -> dict[str, Any]:
 
 
 def write_scoring_strategy(model_route: dict[str, Any], rubric_alignment: dict[str, Any]) -> None:
+    profile = model_route.get("workflow_profile") if isinstance(model_route.get("workflow_profile"), dict) else {}
     lines = [
         "# 评分闭环与模型路线策略\n\n",
         "本文件由 `modeling-paper-rubric-and-model-selector` 根据结构化题意分析生成，用于指导后续建模、证据审计与正式写作。\n\n",
+        f"- 当前执行 profile：`{profile.get('profile', 'standard')}`\n",
         "## 全局原则\n\n",
         "- 每一问必须形成“任务定义 -> 模型建立 -> 求解结果 -> 验证检验 -> 回答原问”的闭环。\n",
         "- `model_route.json` 是后续写作的模型路线交接单，不能在正文生成时随意偷换主模型。\n",
-        "- `rubric_alignment.json` 是评分点与证据形式的映射，QA 应逐条检查是否落实。\n\n",
+        "- `rubric_alignment.json` 是评分点与证据形式的映射，QA 应逐条检查是否落实。\n",
     ]
+    if profile.get("profile") == "beginner-guided":
+        lines.extend(
+            [
+                "- beginner-guided 要求先真实运行基线；复杂模型只作为候选升级，不得在基线运行前直接替换主模型。\n",
+                "- 无升级触发证据时保持基线；尝试升级时必须比较精度、稳定性、可解释性和实现成本。\n\n",
+            ]
+        )
+    else:
+        lines.append("\n")
+
     rubric_items = rubric_alignment.get("items", [])
     for question in model_route.get("questions", []):
         qid = question.get("question_id")
+        policy = question.get("execution_policy") if isinstance(question.get("execution_policy"), dict) else {}
+        gate = policy.get("upgrade_gate") if isinstance(policy.get("upgrade_gate"), dict) else {}
         lines.append(f"## {question.get('title', qid)}\n\n")
         lines.append(f"- 任务类型：{question.get('task_type')}\n")
         lines.append(f"- 核心目标：{question.get('core_goal')}\n")
         lines.append(f"- 基线模型：{question.get('baseline_model')}\n")
-        lines.append(f"- 主模型：{question.get('main_model')}\n")
+        lines.append(f"- 当前主模型：{question.get('main_model')}\n")
+        if question.get("candidate_upgrade_model"):
+            lines.append(f"- 候选升级模型：{question.get('candidate_upgrade_model')}\n")
+        if gate.get("enabled"):
+            lines.append(f"- 升级触发条件：{'；'.join(gate.get('trigger_any', []))}\n")
+            lines.append(f"- 无触发时动作：{gate.get('no_trigger_action')}\n")
+            lines.append(f"- 模型比较维度：{'；'.join(policy.get('comparison_dimensions', []))}\n")
         lines.append(f"- 模型理由：{question.get('model_reason')}\n")
         lines.append(f"- 公式要求：{'；'.join(question.get('formula_requirements', []))}\n")
         lines.append(f"- 验证计划：{'；'.join(question.get('validation', []))}\n")
@@ -284,6 +371,7 @@ def main() -> int:
     print(f"✅ 已生成评分点映射：{RUBRIC_ALIGNMENT_FILE}")
     print(f"✅ 已生成评分策略说明：{SCORING_STRATEGY_FILE}")
     print(f"   子问题数量：{len(model_route.get('questions', []))}")
+    print(f"   workflow profile：{model_route.get('workflow_profile', {}).get('profile', 'standard')}")
     return 0
 
 

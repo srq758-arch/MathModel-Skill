@@ -13,12 +13,30 @@ From the contest project root, run:
 
 ```bash
 python .trae/skills/paper-workflow-orchestrator/scripts/preflight_check.py
+python .trae/skills/paper-workflow-orchestrator/scripts/workflow_profile.py --show
 python .trae/skills/paper-workflow-orchestrator/scripts/workflow_guard.py --status
 ```
 
+Read the active workflow profile before routing S1-S5. If `paper_output/context/workflow_profile.json` is absent, `--show` returns implicit `standard` without creating a file. If it reports `beginner-guided`, treat the profile as an execution contract for S1-S5, not merely as explanatory prose.
+
 Read `paper_output/qa/workflow_guard_report.json` and follow `recommended_skill` plus `next_action`. The current files and hashes override conversational memory.
 
-Do not run downstream skills before their guard requirement passes. After a child skill finishes, return here and evaluate status again.
+Do not run downstream skills before their guard requirement passes. After a child skill finishes, return here, re-read the active workflow profile, and evaluate status again.
+
+## Active Workflow Profile Contract
+
+When the active profile is `beginner-guided`, enforce all of the following while preserving ordinary Standard delivery:
+
+- **S1:** explain each question in plain language; identify knowns, unknowns, constraints, and the main difficulty before proposing complex methods.
+- **S2:** choose a runnable baseline for every question first; declare inputs, outputs, metrics, candidate upgrade models, and explicit upgrade triggers. The candidate upgrade is not yet the adopted main model.
+- **S3:** prepare data and visualization work so baseline diagnostics and the predeclared evaluation metrics can actually be computed.
+- **S4:** implement the baseline path first. Keep any more complex candidate model behind a separate upgrade hook or clearly separated code path so the baseline remains reproducible.
+- **S5:** run the baseline before any upgrade. Upgrade only when at least one declared trigger is supported by real results, such as an inadequate baseline, systematic residuals, constraint violation, instability, or a justified measurable gain. If no trigger is supported, keep the baseline. If an upgrade is tried, compare viable models on accuracy, stability, interpretability, and implementation cost.
+- After each major S1-S5 stage, give a beginner-facing explanation of at most 8 lines covering what was done, why, files produced, and what will be checked next.
+
+`beginner-guided` never weakens or bypasses S6 evidence validation, S7 formal authoring, or S8 Word/PDF render validation. Never invent an upgrade trigger, baseline result, comparison result, or successful run.
+
+When the active profile is `standard`, follow the ordinary S0-S8 behavior below without adding beginner-only gates.
 
 ## S0-S8
 
@@ -133,8 +151,9 @@ Legacy micro-unit and quickstart outputs remain under `paper_output/drafts/legac
 For an interrupted or long task:
 
 ```bash
+python .trae/skills/paper-workflow-orchestrator/scripts/workflow_profile.py --show
 python .trae/skills/paper-workflow-orchestrator/scripts/workflow_guard.py --status
 python .trae/skills/context-memory-keeper/scripts/update_workflow_memory.py
 ```
 
-Read the guard report, current stage contracts, and `paper_output/context/workflow_memory.json`; continue from the first failing stage instead of replaying completed work.
+Read the active workflow profile, guard report, current stage contracts, and `paper_output/context/workflow_memory.json`; continue from the first failing stage instead of replaying completed work.
